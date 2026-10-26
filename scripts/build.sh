@@ -15,6 +15,10 @@ MONO_SHA256=a16606ef0724202e6a6848ece6e0cbba64d11e2f11aefe744af1d93c6d9f99bb
 GECKO_VERSION=2.47.4
 GECKO_X86_SHA256=2cfc8d5c948602e21eff8a78613e1826f2d033df9672cace87fed56e8310afb6
 GECKO_X86_64_SHA256=fd88fc7e537d058d7a8abf0c1ebc90c574892a466de86706a26d254710a82814
+# Homebrew's "sdl2" is now sdl2-compat, a shim that dlopens SDL3: bundled alone it crashes
+# winebus' SDL thread at startup and no game controller is ever seen. Ship real SDL2.
+SDL2_VERSION=2.32.10
+SDL2_SHA256=4a7ac31640d70214e848f994be8a12849c0f97918a7e6c2e27a40036166d1a7f
 
 VERSION=${ADEGA_WINE_VERSION:-cx$CX_VERSION-$(git rev-parse --short HEAD 2>/dev/null || echo local)}
 WORK=$ROOT/work
@@ -77,13 +81,27 @@ tar xJf "$(fetch "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-geck
 tar xJf "$(fetch "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86_64.tar.xz" $GECKO_X86_64_SHA256)" -C "$STAGE/share/wine/gecko"
 
 echo "== bundle dylibs"
-# Libraries Wine dlopen()s by name (SONAME_*), resolved in Homebrew.
+# Official SDL2 framework (x86_64 slice), named the way winebus dlopen()s it.
+dmg=$(fetch "https://github.com/libsdl-org/SDL/releases/download/release-$SDL2_VERSION/SDL2-$SDL2_VERSION.dmg" $SDL2_SHA256)
+mount=$(mktemp -d)
+hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount" -quiet
+mkdir -p "$WORK/sdl2"
+lipo -thin x86_64 "$mount/SDL2.framework/Versions/A/SDL2" -output "$WORK/sdl2/libSDL2-2.0.0.dylib"
+hdiutil detach "$mount" -quiet
+
+# Libraries Wine dlopen()s by name (SONAME_*), resolved in Homebrew (SDL2: the official one).
 dlopened=()
 for name in $(sed -n 's/^#define SONAME_[A-Z0-9_]* "\(.*\)"$/\1/p' include/config.h); do
-    path=$(brew --prefix)/lib/$name
+    case "$name" in
+        libSDL2-2.0.0.dylib) path=$WORK/sdl2/$name ;;
+        *) path=$(brew --prefix)/lib/$name ;;
+    esac
     [ -e "$path" ] && dlopened+=("$path") || echo "not bundled (system or absent): $name"
 done
 "$ROOT/scripts/bundle-libs.sh" "$STAGE" ${dlopened[@]+"${dlopened[@]}"}
+if strings -a "$STAGE/lib/libSDL2-2.0.0.dylib" | grep -q sdl2-compat; then
+    echo "Bundled SDL2 is sdl2-compat (needs SDL3): game controllers would not work." >&2; exit 1
+fi
 
 echo "== sources notice"
 mkdir -p "$STAGE/share/doc/adega-wine"
