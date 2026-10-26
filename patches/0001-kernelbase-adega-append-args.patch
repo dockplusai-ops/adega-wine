@@ -1,0 +1,56 @@
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -500,6 +500,37 @@
+     RtlFreeUnicodeString( &desktopW );
+     RtlFreeUnicodeString( &titleW );
+     return ret;
++}
++
++/* Adega: the launcher passes per-program argument fixes in ADEGA_APPEND_ARGS as
++ * "name.exe|arguments to append|substring that disables the rule;...". The name is
++ * matched case-insensitively against the executable's file name. Returns a new heap
++ * command line, or NULL when no rule applies. */
++static WCHAR *adega_append_args( const WCHAR *app_name, const WCHAR *cmd_line )
++{
++    WCHAR rules[4096], *rule, *next, *append, *forbidden, *ret;
++    const WCHAR *base = wcsrchr( app_name, '\\' );
++    DWORD len = GetEnvironmentVariableW( L"ADEGA_APPEND_ARGS", rules, ARRAY_SIZE(rules) );
++    SIZE_T size;
++
++    if (!len || len >= ARRAY_SIZE(rules)) return NULL;
++    base = base ? base + 1 : app_name;
++    for (rule = rules; rule; rule = next)
++    {
++        if ((next = wcschr( rule, ';' ))) *next++ = 0;
++        if (!(append = wcschr( rule, '|' ))) continue;
++        *append++ = 0;
++        if ((forbidden = wcschr( append, '|' ))) *forbidden++ = 0;
++        if (lstrcmpiW( base, rule )) continue;
++        if (forbidden && *forbidden && wcsstr( cmd_line, forbidden )) return NULL;
++        if (wcsstr( cmd_line, append )) return NULL;
++        size = lstrlenW( cmd_line ) + lstrlenW( append ) + 2;
++        if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) return NULL;
++        swprintf( ret, size, L"%s %s", cmd_line, append );
++        TRACE( "adega: %s -> %s\n", debugstr_w(cmd_line), debugstr_w(ret) );
++        return ret;
++    }
++    return NULL;
+ }
+ 
+ /**********************************************************************
+@@ -543,6 +574,15 @@
+         app_name = name;
+     }
+ 
++    {
++        WCHAR *fixed = adega_append_args( app_name, tidy_cmdline );
++        if (fixed)
++        {
++            if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
++            tidy_cmdline = fixed;
++        }
++    }
++
+     /* Warn if unsupported features are used */
+ 
+     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |

@@ -1,0 +1,52 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  wine:
+    # Wine for macOS is x86_64-only (Apple Silicon runs it under Rosetta), so the build
+    # needs an Intel runner, where Homebrew installs x86_64 dependencies.
+    runs-on: macos-15-intel
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          brew install bison flex pkgconf gettext mingw-w64 freetype gnutls sdl2 molten-vk
+          # No vulkan-loader on purpose: configure then links MoltenVK directly, like CrossOver.
+          brew uninstall --ignore-dependencies vulkan-loader 2>/dev/null || true
+
+      - name: Build
+        env:
+          ADEGA_WINE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('dev-{0}', github.run_number) }}
+        run: ./scripts/build.sh
+
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            work/build/configure.log
+            work/build/make.log
+            work/build/include/config.h
+          if-no-files-found: ignore
+
+      - name: Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: adega-wine
+          path: out/*
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" out/* --title "${{ github.ref_name }}" --notes-file out/*.sha256
