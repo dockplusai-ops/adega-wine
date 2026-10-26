@@ -61,13 +61,16 @@ while [ ${#queue[@]} -gt 0 ]; do
 done
 
 # install_name_tool invalidates signatures; macOS refuses to load unsigned code.
+# (if, not &&: a false test as the loop's last command would stop the script under set -e)
 find "$WINE/bin" "$WINE/lib" -type f -print0 | while IFS= read -r -d '' file; do
-    is_macho "$file" && codesign --force --sign - "$file" 2>/dev/null
+    if is_macho "$file"; then codesign --force --sign - "$file"; fi
 done
 
 # Nothing may still point into Homebrew.
 leftovers=$(find "$WINE" -type f -print0 | while IFS= read -r -d '' f; do
-    is_macho "$f" && deps "$f" | while read -r d; do is_external "$d" && echo "$f -> $d"; done
+    if is_macho "$f"; then
+        deps "$f" | while read -r d; do if is_external "$d"; then echo "$f -> $d"; fi; done
+    fi
 done)
 if [ -n "$leftovers" ]; then
     echo "Still linked to Homebrew:"; echo "$leftovers"; exit 1
