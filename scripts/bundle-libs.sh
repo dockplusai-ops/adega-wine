@@ -37,6 +37,9 @@ while IFS= read -r -d '' file; do
         queue+=("$dep")
         changed=1
     done
+    # Always for Wine's unix libraries: Wine dlopen()s freetype, gnutls, MoltenVK… by bare
+    # name, and dyld only looks for those in the caller's rpaths.
+    case "$file" in "$WINE"/lib/wine/*) changed=1 ;; esac
     if [ $changed = 1 ] && ! otool -l "$file" | grep -q "path $rpath "; then
         install_name_tool -add_rpath "$rpath" "$file"
     fi
