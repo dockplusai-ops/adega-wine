@@ -9,7 +9,7 @@ O Wine usado pelo [Adega](https://github.com/dockplusai-ops), compilado para mac
 | `scripts/build.sh` | Baixa os fontes do CrossOver (SHA-256 fixo), aplica `patches/`, configura, compila, junta Wine Mono e Gecko, empacota |
 | `scripts/bundle-libs.sh` | Copia as bibliotecas do Homebrew para dentro do pacote, para ele rodar em qualquer Mac |
 | `patches/` | Alterações do Adega sobre os fontes do CrossOver |
-| `.github/workflows/build.yml` | Build num runner Intel do GitHub; uma tag `v*` publica a release |
+| `.github/workflows/build.yml` | Build num runner Intel do GitHub; com o campo `release` preenchido, publica a release |
 
 ## Patches
 
@@ -17,7 +17,7 @@ O Wine usado pelo [Adega](https://github.com/dockplusai-ops), compilado para mac
 
 ## Compilar
 
-No GitHub: **Actions → build → Run workflow**. Para publicar, crie uma tag `vX.Y.Z`.
+No GitHub: **Actions → build → Run workflow**. Para publicar, preencha `release` com a versão (ex.: `v26.3.0-1`).
 
 Localmente (Mac Intel, com as dependências do workflow instaladas pelo Homebrew):
 
