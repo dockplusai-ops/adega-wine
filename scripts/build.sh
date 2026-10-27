@@ -19,6 +19,10 @@ GECKO_X86_64_SHA256=fd88fc7e537d058d7a8abf0c1ebc90c574892a466de86706a26d254710a8
 # winebus' SDL thread at startup and no game controller is ever seen. Ship real SDL2.
 SDL2_VERSION=2.32.10
 SDL2_SHA256=4a7ac31640d70214e848f994be8a12849c0f97918a7e6c2e27a40036166d1a7f
+# macOS has no inotify, so without this shim wineserver never reports directory changes:
+# ReadDirectoryChangesW waits forever (Epic Games Launcher: DP-06 on every install).
+INOTIFY_VERSION=20240724
+INOTIFY_SHA256=5cc3fb7af407b17b7daa871cc98bb882716c4b5c296fadfb66bfe86c37cc599c
 
 VERSION=${ADEGA_WINE_VERSION:-cx$CX_VERSION-$(git rev-parse --short HEAD 2>/dev/null || echo local)}
 WORK=$ROOT/work
@@ -50,6 +54,15 @@ for patch in "$ROOT"/patches/*.patch; do
     echo "applied $(basename "$patch")"
 done
 
+echo "== libinotify-kqueue $INOTIFY_VERSION (static, linked into wineserver)"
+inotify=$(fetch "https://github.com/libinotify-kqueue/libinotify-kqueue/releases/download/$INOTIFY_VERSION/libinotify-$INOTIFY_VERSION.tar.gz" $INOTIFY_SHA256)
+rm -rf "$WORK/inotify-src" "$WORK/inotify" && mkdir -p "$WORK/inotify-src"
+tar xzf "$inotify" -C "$WORK/inotify-src" --strip-components 1
+# fdclosedir exists only from macOS 26.4: with a newer SDK, configure would find it and the build fails.
+(cd "$WORK/inotify-src" && ./configure --prefix="$WORK/inotify" --disable-shared --enable-static ac_cv_func_fdclosedir=no > configure.log 2>&1 \
+    && make -j"$JOBS" install > make.log 2>&1) || { tail -40 "$WORK/inotify-src/"*.log; exit 1; }
+export PKG_CONFIG_PATH="$WORK/inotify/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 echo "== configure"
 # Same options as Gcenx's wine-devel build (macports-wine), minus GStreamer for now.
 # Vulkan: no vulkan-loader installed, so configure links MoltenVK directly, like CrossOver.
@@ -61,13 +74,14 @@ CFLAGS="-O2" CROSSCFLAGS="-O2" "$SRC/wine/configure" \
     --disable-tests --disable-winebth_sys \
     --without-alsa --without-capi --with-coreaudio --with-cups --without-dbus \
     --without-ffmpeg --without-fontconfig --with-freetype --with-gettext --without-gettextpo \
-    --without-gphoto --with-gnutls --without-gssapi --without-gstreamer --without-inotify \
+    --without-gphoto --with-gnutls --without-gssapi --without-gstreamer --with-inotify \
     --without-krb5 --without-netapi --with-opencl --without-opengl --without-oss \
     --with-pcap --with-pcsclite --with-pthread --without-pulse --without-sane --with-sdl \
     --without-udev --without-usb --without-v4l2 --with-vulkan --without-wayland --without-x \
     > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
 grep -E "^configure: (WARNING|error)" configure.log || true
 grep -E "#define SONAME_" include/config.h
+grep -q "#define HAVE_SYS_INOTIFY_H 1" include/config.h || { echo "inotify not found: no directory change notifications" >&2; exit 1; }
 
 echo "== make"
 make -j"$JOBS" > make.log 2>&1 || { tail -60 make.log; exit 1; }
